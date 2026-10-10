@@ -55,7 +55,7 @@ Open the URL Streamlit prints (usually `http://localhost:8501`). Pick **Customer
 pytest
 ```
 
-All ~157 tests run offline with the LLM client mocked — no network calls, no API key required to run them.
+All tests pass, running offline with the LLM client mocked — no network calls, no API key required to run them.
 
 ## Architecture
 
@@ -139,7 +139,7 @@ src/                    application code (session-independent, fully unit-tested
   guard.py / output_check.py / audit.py       safety, redaction, logging
 data/raw/               the provided PDFs, ridewise.db, data dictionary (never modified)
 data/derived/           transcribed scanned-image annexures (derived, not raw)
-tests/                  pytest suite (~157 tests, LLM always mocked)
+tests/                  pytest suite (LLM always mocked)
 scripts/                one-off/manual scripts (discovery, adversarial smoke test, PDF tools)
 DECISIONS.md            design decisions, limitations, what's next
 ```
