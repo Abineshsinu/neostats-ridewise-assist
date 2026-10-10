@@ -49,6 +49,18 @@ def test_list_my_bookings_returns_only_own_bookings():
     assert ids == {"B-0001", "B-0554", "B-1653"}
 
 
+def test_list_my_bookings_includes_code_computed_ist_times():
+    """Timezone conversion must happen in code, never left for the LLM to
+    guess — a prior bug had the composer relabel raw UTC as "(IST)"
+    without converting. B-0001's scheduled_start is 2026-08-15 04:30:00
+    UTC, which is 10:00 IST (+5:30)."""
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.list_my_bookings(cust1)
+    booking = next(b for b in result.data if b["booking_id"] == "B-0001")
+    assert booking["scheduled_start"] == "2026-08-15 04:30:00"
+    assert booking["scheduled_start_ist"] == "2026-08-15 10:00 IST"
+
+
 def test_payments_for_booking_requires_ownership():
     cust1 = build_customer_sandbox("CUST0001")
     result = da.payments_for_booking(cust1, "B-1700")

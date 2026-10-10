@@ -20,12 +20,29 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 
 from src import calculators as calc
-from src.clock import hours_between_exact, now_utc, parse_utc
+from src.clock import format_ist, hours_between_exact, now_utc, parse_utc
 
 NOT_FOUND_MESSAGE = (
     "I couldn't find a booking with that ID on this account. "
     "Please check the booking ID and try again."
 )
+
+
+def _ist(utc_str: str | None) -> str | None:
+    """Convert a stored UTC timestamp string to a formatted IST string in
+    code — never leave timezone arithmetic to the LLM, which will happily
+    relabel a raw UTC value "(IST)" without actually converting it."""
+    if not utc_str:
+        return None
+    return format_ist(parse_utc(utc_str))
+
+
+def _with_ist_times(row: dict, fields: list[str]) -> dict:
+    d = dict(row)
+    for f in fields:
+        if f in d:
+            d[f"{f}_ist"] = _ist(d[f])
+    return d
 
 
 @dataclass
@@ -53,7 +70,7 @@ def list_my_bookings(con: sqlite3.Connection, limit: int = 50) -> ToolResult:
         "FROM bookings ORDER BY scheduled_start DESC LIMIT ?",
         (limit,),
     )
-    rows = [dict(r) for r in cur.fetchall()]
+    rows = [_with_ist_times(dict(r), ["scheduled_start", "scheduled_end"]) for r in cur.fetchall()]
     evidence = [{"type": "data", "table": "bookings", "row_ids": [r["booking_id"] for r in rows]}]
     return ToolResult(ok=True, data=rows, evidence=evidence)
 
@@ -65,7 +82,8 @@ def booking_detail(con: sqlite3.Connection, booking_id: str) -> ToolResult:
     cur = con.cursor()
     cur.execute("SELECT * FROM vehicles WHERE vehicle_id = ?", (row["vehicle_id"],))
     vehicle = cur.fetchone()
-    data = {"booking": dict(row), "vehicle": dict(vehicle) if vehicle else None}
+    booking_data = _with_ist_times(dict(row), ["booked_at", "scheduled_start", "scheduled_end", "actual_return_at", "cancelled_at"])
+    data = {"booking": booking_data, "vehicle": dict(vehicle) if vehicle else None}
     evidence = [{"type": "data", "table": "bookings", "row_ids": [booking_id]}]
     if vehicle:
         evidence.append({"type": "data", "table": "vehicles", "row_ids": [vehicle["vehicle_id"]]})
@@ -78,7 +96,7 @@ def payments_for_booking(con: sqlite3.Connection, booking_id: str) -> ToolResult
         return ToolResult(ok=False, message=NOT_FOUND_MESSAGE)
     cur = con.cursor()
     cur.execute("SELECT * FROM payments WHERE booking_id = ? ORDER BY paid_at", (booking_id,))
-    payments = [dict(r) for r in cur.fetchall()]
+    payments = [_with_ist_times(dict(r), ["paid_at"]) for r in cur.fetchall()]
     evidence = [{"type": "data", "table": "payments", "row_ids": [p["payment_id"] for p in payments]}]
     return ToolResult(ok=True, data=payments, evidence=evidence)
 

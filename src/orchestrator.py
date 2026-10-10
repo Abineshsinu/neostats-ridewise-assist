@@ -58,6 +58,16 @@ def run_turn(
     booking_id = the_plan.entities.booking_id or resolved_entities.get("booking_id")
 
     if "data" in the_plan.needs or "calculation" in the_plan.needs:
+        if role == "customer":
+            # The connection is already scoped to this customer's own data
+            # (fixed by the session, never by chat text — see src/guard.py).
+            # Tell the composer explicitly so it doesn't go looking for a
+            # customer_id column to "confirm" whose data this is.
+            assumptions.append(
+                "All data evidence below belongs to the customer's own account for this session "
+                "(scoped by the session, not by any customer ID mentioned in chat text). "
+                "There is no customer_id column to match against."
+            )
         tool_evidence, tool_assumptions, early_refusal = _run_data_tools(con, role, the_plan, booking_id)
         evidence.extend(tool_evidence)
         assumptions.extend(tool_assumptions)
