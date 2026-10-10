@@ -14,6 +14,8 @@ REVEAL_UNMASKED = False  # v1: always off. No UI control exists to change this.
 
 EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 PHONE_RE = re.compile(r"\b[6-9]\d{9}\b")
+# driving_license_no format observed in the data: 2 letters + 13 digits (e.g. KA0120160012345).
+LICENCE_RE = re.compile(r"\b[A-Z]{2}\d{13}\b")
 
 
 def mask_phone(phone: str | None) -> str | None:
@@ -46,6 +48,7 @@ def mask_free_text(text: str | None) -> str | None:
         return text
     text = EMAIL_RE.sub("[redacted-email]", text)
     text = PHONE_RE.sub("[redacted-phone]", text)
+    text = LICENCE_RE.sub("[redacted-licence]", text)
     return text
 
 

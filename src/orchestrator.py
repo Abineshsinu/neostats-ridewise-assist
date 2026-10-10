@@ -13,6 +13,7 @@ from src import data_access as da
 from src import guard
 from src.composer import compose
 from src.llm_client import LLMClient
+from src.output_check import run_output_check
 from src.planner import Plan, plan
 from src.policy_search import PolicySearch
 
@@ -99,7 +100,10 @@ def run_turn(
         )
 
     result = compose(client, user_message, assumptions, evidence)
-    return TurnResult(answer=result.content, evidence=evidence, assumptions=assumptions, plan=the_plan)
+    checked_answer, warnings = run_output_check(result.content, role, evidence)
+    if warnings:
+        checked_answer = checked_answer + "\n\n" + "\n".join(warnings)
+    return TurnResult(answer=checked_answer, evidence=evidence, assumptions=assumptions, plan=the_plan)
 
 
 def _run_data_tools(con, role: str, the_plan: Plan, booking_id: str | None) -> tuple[list[dict], list[str], str | None]:
