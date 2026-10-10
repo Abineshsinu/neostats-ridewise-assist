@@ -4,8 +4,20 @@ RideWise Assist — Streamlit chat UI.
 Session layer: role and customer_id are chosen ONCE at the start screen
 and stored only in st.session_state (server-side); chat text can never
 change them (see src/guard.py). Changing role or customer_id, or clicking
-"New conversation", resets ALL state — history, resolved entities, and
-the underlying DB connection — so nothing leaks across sessions or roles.
+"New conversation", resets ALL state — history and resolved entities —
+so nothing leaks across sessions or roles.
+
+Deliberately NOT stored in session_state: the sandbox/agent SQLite
+connection itself. Streamlit's ScriptRunner can execute different reruns
+of the same session on different OS threads, and a long-lived connection
+object surviving across those reruns is exactly what caused a real
+"SQLite objects created in a thread can only be used in that same thread"
+crash in production. Rather than depend on getting a threading flag right
+in a framework we don't fully control, we rebuild the (sub-millisecond,
+in-memory) connection fresh on every turn from session_state.role /
+session_state.customer_id. This also means the connection is always
+created and used within the same function call on the same thread,
+by construction — there is no cross-thread path left to get wrong.
 """
 from __future__ import annotations
 
@@ -38,8 +50,16 @@ def reset_conversation() -> None:
 def reset_session() -> None:
     st.session_state.role = None
     st.session_state.customer_id = None
-    st.session_state.con = None
     reset_conversation()
+
+
+def get_session_connection():
+    """Build the sandbox/agent connection fresh, from session_state.role
+    and session_state.customer_id only — never from anything stored across
+    reruns, and never from chat text. Called once per turn."""
+    if st.session_state.role == "customer":
+        return build_customer_sandbox(st.session_state.customer_id)
+    return build_agent_connection()
 
 
 def start_screen() -> None:
@@ -54,13 +74,13 @@ def start_screen() -> None:
             if not customer_id.strip():
                 st.error("Please enter a customer ID.")
                 return
-            con = build_customer_sandbox(customer_id.strip())
-            if con is None:
+            # Validate the id exists now; the connection itself is rebuilt
+            # fresh on every turn, never persisted in session_state.
+            if build_customer_sandbox(customer_id.strip()) is None:
                 st.error("We couldn't start a session with that customer ID. Please check it and try again.")
                 return
             st.session_state.role = "customer"
             st.session_state.customer_id = customer_id.strip().upper()
-            st.session_state.con = con
             reset_conversation()
             st.rerun()
     else:
@@ -68,7 +88,6 @@ def start_screen() -> None:
         if st.button("Start as Support Agent", type="primary"):
             st.session_state.role = "agent"
             st.session_state.customer_id = None
-            st.session_state.con = build_agent_connection()
             reset_conversation()
             st.rerun()
 
@@ -104,10 +123,11 @@ def chat_screen() -> None:
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
+                con = get_session_connection()
                 result = run_turn(
                     get_llm_client(),
                     get_policy_search(),
-                    st.session_state.con,
+                    con,
                     role,
                     user_input,
                     st.session_state.history,
