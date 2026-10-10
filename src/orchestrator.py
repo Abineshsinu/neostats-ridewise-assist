@@ -54,9 +54,20 @@ def run_turn(
         return TurnResult(answer=the_plan.clarification_question, evidence=[], assumptions=[], plan=the_plan)
 
     # Merge newly resolved entities into the running memory (code-managed, not the LLM's job).
+    # Capture the PRIOR vehicle_type before merging overwrites it: switching
+    # type without naming a new model ("and for an EV?") must drop a stale
+    # remembered model name, since model matching is tried before type
+    # matching in the vehicle lookup and would otherwise keep winning.
+    prior_vehicle_type = resolved_entities.get("vehicle_type")
     for key, value in the_plan.entities.model_dump().items():
         if value not in (None, False):
             resolved_entities[key] = value
+    if (
+        the_plan.entities.vehicle_type
+        and the_plan.entities.vehicle_type != prior_vehicle_type
+        and not the_plan.entities.vehicle_model
+    ):
+        resolved_entities["vehicle_model"] = None
 
     evidence: list[dict] = []
     assumptions: list[str] = []
@@ -73,7 +84,7 @@ def run_turn(
                 "(scoped by the session, not by any customer ID mentioned in chat text). "
                 "There is no customer_id column to match against."
             )
-        tool_evidence, tool_assumptions, early_refusal = _run_data_tools(con, role, the_plan, booking_id)
+        tool_evidence, tool_assumptions, early_refusal = _run_data_tools(con, role, the_plan, booking_id, resolved_entities)
         evidence.extend(tool_evidence)
         assumptions.extend(tool_assumptions)
         if early_refusal:
@@ -113,7 +124,7 @@ def run_turn(
     return TurnResult(answer=checked_answer, evidence=evidence, assumptions=assumptions, plan=the_plan)
 
 
-def _run_data_tools(con, role: str, the_plan: Plan, booking_id: str | None) -> tuple[list[dict], list[str], str | None]:
+def _run_data_tools(con, role: str, the_plan: Plan, booking_id: str | None, resolved_entities: dict) -> tuple[list[dict], list[str], str | None]:
     evidence: list[dict] = []
     assumptions: list[str] = []
 
@@ -124,10 +135,20 @@ def _run_data_tools(con, role: str, the_plan: Plan, booking_id: str | None) -> t
             evidence.append({"type": "data", "payload": result.data})
         return evidence, assumptions, None
 
+    # Follow-up memory: resolved_entities was already merged (and the stale
+    # vehicle_model cleared on a type switch) by run_turn before this was
+    # called, so reading straight from it is enough — a message like "what
+    # if I'm Gold?" that only states the tier still resolves the vehicle
+    # and delay from what was last established, maintained by code, not
+    # re-derived by the LLM each turn.
+    vehicle_model = resolved_entities.get("vehicle_model")
+    vehicle_type = resolved_entities.get("vehicle_type")
+    tier = resolved_entities.get("tier") or "STANDARD"
+    delay = resolved_entities.get("delay_minutes", 0)
+    battery_pct = resolved_entities.get("battery_pct")
+
     if the_plan.intent == "late_fee_hypothetical":
-        tier = the_plan.entities.tier or "STANDARD"
-        delay = the_plan.entities.delay_minutes if the_plan.entities.delay_minutes is not None else 0
-        result = da.late_fee_hypothetical(con, the_plan.entities.vehicle_model, the_plan.entities.vehicle_type, delay, tier)
+        result = da.late_fee_hypothetical(con, vehicle_model, vehicle_type, delay, tier)
         if not result.ok:
             return evidence, assumptions, result.message
         evidence.extend(result.evidence)
@@ -135,7 +156,7 @@ def _run_data_tools(con, role: str, the_plan: Plan, booking_id: str | None) -> t
         return evidence, assumptions, None
 
     if the_plan.intent == "battery_fee_hypothetical":
-        result = da.battery_fee_hypothetical(con, the_plan.entities.vehicle_model, the_plan.entities.vehicle_type, the_plan.entities.battery_pct)
+        result = da.battery_fee_hypothetical(con, vehicle_model, vehicle_type, battery_pct)
         if not result.ok:
             return evidence, assumptions, result.message
         evidence.extend(result.evidence)
