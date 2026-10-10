@@ -89,6 +89,21 @@ def test_agent_connection_has_all_customers():
     assert cur.fetchone()["c"] == 200
 
 
+def test_agent_connection_normalizes_dirty_bengaluru_city_values():
+    """Source data has city as 'Bengaluru' (79), 'Bangalore' (39), 'BLR'
+    (29), and 'bangalore ' with a trailing space (17) — all the same city.
+    Grouping by the normalized value on the agent connection must give a
+    single 'Bengaluru' bucket of 164."""
+    con = build_agent_connection()
+    cur = con.cursor()
+    cur.execute("SELECT city, COUNT(*) AS c FROM customers GROUP BY city ORDER BY c DESC")
+    counts = {r["city"]: r["c"] for r in cur.fetchall()}
+    assert counts.get("Bengaluru") == 164
+    assert "Bangalore" not in counts
+    assert "BLR" not in counts
+    assert "bangalore " not in counts
+
+
 # ---------------------------------------------------------------------------
 # Regression: Streamlit reruns the script in a new thread per interaction,
 # but the sandbox/agent connection lives in st.session_state across reruns.

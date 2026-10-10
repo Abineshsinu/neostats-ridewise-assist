@@ -20,6 +20,7 @@ import sqlite3
 
 from src.db import DB_PATH
 from src import masking
+from src.city import normalize_city
 
 SCHEMA = """
 CREATE TABLE customers (
@@ -155,7 +156,7 @@ def build_agent_connection() -> sqlite3.Connection:
     cur = raw.cursor()
 
     cur.execute("SELECT * FROM customers")
-    customer_rows = [_mask_customer_row(r) for r in cur.fetchall()]
+    customer_rows = [_normalize_customer_city(_mask_customer_row(r)) for r in cur.fetchall()]
     cur.execute("SELECT * FROM vehicles")
     vehicle_rows = cur.fetchall()
     cur.execute("SELECT * FROM bookings")
@@ -178,6 +179,15 @@ def build_agent_connection() -> sqlite3.Connection:
     _insert_rows(agent_db, "damage_reports", damage_rows)
     agent_db.commit()
     return agent_db
+
+
+def _normalize_customer_city(d: dict) -> dict:
+    """customers.city is dirty in the source data (Bengaluru/Bangalore/BLR/
+    "bangalore " all mean the same city). Normalized only for the agent
+    connection, where it matters for grouping/filtering by city — never
+    written back to ridewise.db."""
+    d["city"] = normalize_city(d.get("city"))
+    return d
 
 
 def _mask_customer_row(r: sqlite3.Row) -> dict:
