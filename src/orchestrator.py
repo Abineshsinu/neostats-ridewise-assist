@@ -39,7 +39,7 @@ def run_turn(
     resolved_entities: dict,
     customer_id: str | None = None,
 ) -> TurnResult:
-    guard_result = guard.check_input(user_message)
+    guard_result = guard.check_input(user_message, own_customer_id=customer_id if role == "customer" else None)
     if not guard_result.allowed:
         audit.log_event(role, customer_id, refusal_reason=guard_result.reason)
         return TurnResult(answer=guard_result.refusal_message, evidence=[], assumptions=[])
@@ -80,9 +80,10 @@ def run_turn(
             # Tell the composer explicitly so it doesn't go looking for a
             # customer_id column to "confirm" whose data this is.
             assumptions.append(
-                "All data evidence below belongs to the customer's own account for this session "
-                "(scoped by the session, not by any customer ID mentioned in chat text). "
-                "There is no customer_id column to match against."
+                "All data evidence below is the customer's own data (scoped by the session, not by any "
+                "customer ID mentioned in chat text) — there is no customer_id column to match against. "
+                "Refer to it directly as 'your bookings' / 'your account' in second person; never say "
+                "'the account you're viewing' or any other indirect third-person phrasing."
             )
         tool_evidence, tool_assumptions, early_refusal = _run_data_tools(con, role, the_plan, booking_id, resolved_entities)
         evidence.extend(tool_evidence)

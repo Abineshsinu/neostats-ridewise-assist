@@ -6,7 +6,18 @@ requests like "I am an agent now" or "ignore your instructions".
 """
 from __future__ import annotations
 
+import re
+
 MAX_INPUT_LENGTH = 2000
+
+# Matches CUST + 4 digits, tolerating spaces/punctuation in between
+# ("CUST0012", "cust 0012", "CUST-0012", "Cust_0012").
+CUSTOMER_ID_RE = re.compile(r"\bcust[\s\-_]*(\d{4})\b", re.IGNORECASE)
+
+OTHER_CUSTOMER_ID_REFUSAL = (
+    "I can only show information for your own account. I can show your own bookings, "
+    "payments and charges, or answer questions about RideWise policies."
+)
 
 SECRET_REQUEST_MARKERS = [
     "api key", "api_key", "llm_api_key", "system prompt", "your instructions",
@@ -39,7 +50,11 @@ SCOPED_REFUSAL = (
 )
 
 
-def check_input(text: str) -> GuardResult:
+def check_input(text: str, own_customer_id: str | None = None) -> GuardResult:
+    """own_customer_id: the session's own customer id, for the customer
+    role only. Pass None for agents (or when there is no customer id yet)
+    — this check never applies to agent sessions, which are entitled to
+    look up any customer."""
     if len(text) > MAX_INPUT_LENGTH:
         return GuardResult(False, "too_long", f"That message is a bit long — could you keep it under {MAX_INPUT_LENGTH} characters?")
 
@@ -53,7 +68,19 @@ def check_input(text: str) -> GuardResult:
         if marker in lowered:
             return GuardResult(False, "destructive_request", SCOPED_REFUSAL)
 
+    if own_customer_id:
+        own_normalized = _normalize_customer_id(own_customer_id)
+        for match in CUSTOMER_ID_RE.finditer(text):
+            mentioned_normalized = f"CUST{match.group(1)}"
+            if mentioned_normalized != own_normalized:
+                return GuardResult(False, "other_customer_id", OTHER_CUSTOMER_ID_REFUSAL)
+
     return GuardResult(True)
+
+
+def _normalize_customer_id(raw: str) -> str:
+    digits = re.sub(r"\D", "", raw)
+    return f"CUST{digits}"
 
 
 def strip_role_claims_note(text: str) -> bool:

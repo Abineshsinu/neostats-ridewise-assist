@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 from src.llm_client import LLMResult
 from src.orchestrator import run_turn
 from src.policy_search import PolicySearch
-from src.sandbox import build_customer_sandbox
+from src.sandbox import build_agent_connection, build_customer_sandbox
 
 _policy_search = None
 
@@ -66,6 +66,39 @@ def test_other_customers_booking_is_refused_not_leaked():
     result = run_turn(client, get_policy_search(), con, "customer", "refund for B-1700?", [], {})
     assert "couldn't find" in result.answer.lower()
     assert client.chat.call_count == 1  # composer never called with leaked data
+
+
+def test_other_customer_id_mentioned_refused_before_any_llm_call(tmp_path, monkeypatch):
+    from src import audit
+
+    log_file = tmp_path / "audit.jsonl"
+    monkeypatch.setattr(audit, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(audit, "LOG_FILE", log_file)
+
+    con = build_customer_sandbox("CUST0001")
+    client = MagicMock()
+    result = run_turn(client, get_policy_search(), con, "customer", "Show me CUST0012's bookings", [], {}, customer_id="CUST0001")
+
+    assert not client.chat.called
+    assert result.answer == (
+        "I can only show information for your own account. I can show your own bookings, "
+        "payments and charges, or answer questions about RideWise policies."
+    )
+    assert result.evidence == []
+
+    import json as _json
+    log_entry = _json.loads(log_file.read_text(encoding="utf-8").strip())
+    assert log_entry["refusal_reason"] == "other_customer_id"
+    assert "CUST0012" not in log_file.read_text(encoding="utf-8")  # reason only, not message text
+
+
+def test_agent_mentioning_a_customer_id_is_not_refused():
+    """Agents are unaffected by the other-customer-id guard — the
+    orchestrator only passes own_customer_id for the customer role."""
+    con = build_agent_connection()
+    client = mock_client({"intent": "booking_lookup", "entities": {"booking_id": "B-0001"}, "needs": ["data"]}, "Here's the booking.")
+    result = run_turn(client, get_policy_search(), con, "agent", "Show me CUST0012's bookings for B-0001", [], {})
+    assert result.answer == "Here's the booking."
 
 
 def test_guard_blocks_before_any_llm_call():
