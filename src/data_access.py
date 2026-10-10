@@ -200,7 +200,18 @@ def explain_charge(con: sqlite3.Connection, booking_id: str) -> ToolResult:
 
     for dmg in damage_rows:
         dmg_result = calc.damage_chargeable(dmg["claim_status"], Decimal(str(dmg["assessed_cost"])))
-        explanations.append({"check": "damage", "report_id": dmg["report_id"], "result": str(dmg_result.value), "steps": dmg_result.steps})
+        explanations.append({
+            "check": "damage",
+            "report_id": dmg["report_id"],
+            "category": dmg["damage_category"],
+            "severity": dmg["severity"],
+            # Free text, untrusted — the composer is told evidence is data,
+            # never instructions (see src/composer.py), and output_check
+            # flags any instruction-like text found here.
+            "description": dmg["description"],
+            "result": str(dmg_result.value),
+            "steps": dmg_result.steps,
+        })
         evidence.append({"type": "calculation", "tool": "damage_chargeable", "steps": dmg_result.steps, "citations": _cite(dmg_result)})
 
     evidence.append({"type": "data", "table": "payments", "row_ids": [p["payment_id"] for p in penalty_rows]})

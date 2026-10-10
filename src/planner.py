@@ -52,7 +52,7 @@ SYSTEM_PROMPT = """You are the understanding step of a read-only assistant for R
 Given the user's latest message, conversation memory, and any already-resolved entities, output ONLY a single JSON object (no prose, no markdown fences) with this exact shape:
 
 {
-  "intent": "<short snake_case label, e.g. refund_estimate, late_fee_explain, late_fee_hypothetical, battery_fee_hypothetical, booking_lookup, policy_question, analytics, out_of_scope>",
+  "intent": "<short snake_case label, e.g. refund_estimate, charge_explain, late_fee_hypothetical, battery_fee_hypothetical, booking_lookup, payments_lookup, policy_question, analytics, out_of_scope>",
   "entities": {
     "booking_id": "<e.g. B-0001 or null>",
     "vehicle_model": "<e.g. Honda Activa 6G or null>",
@@ -68,6 +68,7 @@ Given the user's latest message, conversation memory, and any already-resolved e
 }
 
 Rules:
+- Use intent "charge_explain" for "why was I charged X", "what does my damage report say", or any question about a penalty/damage charge on a specific booking — needs should include "data" and "calculation".
 - Use intent "late_fee_hypothetical" for a direct "what would the late fee be" question not tied to a real booking (e.g. "a scooter returned 35 minutes late on GOLD tier") — needs should include "calculation" and usually "policy". Convert any stated delay into delay_minutes (e.g. "half an hour" -> 30, "1 hour 10 minutes" -> 70).
 - Use intent "battery_fee_hypothetical" for a direct "what would the low-battery fee be" question for an EV not tied to a real booking — needs should include "calculation" and usually "policy".
 - If a follow-up reuses context from before (e.g. "and for an EV?", "what if I'm Gold?"), carry over the already-resolved entities unless the user overrides them.
