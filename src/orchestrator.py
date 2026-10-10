@@ -124,6 +124,24 @@ def _run_data_tools(con, role: str, the_plan: Plan, booking_id: str | None) -> t
             evidence.append({"type": "data", "payload": result.data})
         return evidence, assumptions, None
 
+    if the_plan.intent == "late_fee_hypothetical":
+        tier = the_plan.entities.tier or "STANDARD"
+        delay = the_plan.entities.delay_minutes if the_plan.entities.delay_minutes is not None else 0
+        result = da.late_fee_hypothetical(con, the_plan.entities.vehicle_model, the_plan.entities.vehicle_type, delay, tier)
+        if not result.ok:
+            return evidence, assumptions, result.message
+        evidence.extend(result.evidence)
+        evidence.append({"type": "data", "payload": result.data})
+        return evidence, assumptions, None
+
+    if the_plan.intent == "battery_fee_hypothetical":
+        result = da.battery_fee_hypothetical(con, the_plan.entities.vehicle_model, the_plan.entities.vehicle_type, the_plan.entities.battery_pct)
+        if not result.ok:
+            return evidence, assumptions, result.message
+        evidence.extend(result.evidence)
+        evidence.append({"type": "data", "payload": result.data})
+        return evidence, assumptions, None
+
     if not booking_id:
         return evidence, assumptions, None
 

@@ -36,6 +36,18 @@ def test_customer_sandbox_payments_belong_only_to_their_bookings():
     assert payment_bookings <= own_bookings
 
 
+def test_customer_sandbox_includes_full_vehicle_catalog():
+    """The vehicle catalog (model/type/rates) is published rate-card info,
+    not customer-private data — needed for hypothetical late-fee/battery-fee
+    questions about models the customer hasn't actually rented."""
+    con = build_customer_sandbox("CUST0001")
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) AS c FROM vehicles")
+    assert cur.fetchone()["c"] == 60
+    cur.execute("SELECT 1 FROM vehicles WHERE model LIKE '%Activa%'")
+    assert cur.fetchone() is not None
+
+
 def test_customer_sandbox_has_no_other_customer_rows_at_all():
     con = build_customer_sandbox("CUST0002")
     cur = con.cursor()

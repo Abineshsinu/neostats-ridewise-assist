@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
+from datetime import timedelta
 from decimal import Decimal
 
 from src import calculators as calc
@@ -211,6 +212,98 @@ def explain_charge(con: sqlite3.Connection, booking_id: str) -> ToolResult:
         "recorded_penalty_payments": penalty_rows,
         "recomputed_checks": explanations,
     }
+    return ToolResult(ok=True, data=data, evidence=evidence)
+
+
+CLARIFY_VEHICLE_MESSAGE = (
+    "Which vehicle model or type (e.g. 'Honda Activa 6G' or 'scooter') did you mean? "
+    "The late fee and battery fee both depend on the specific vehicle's hourly rate."
+)
+CLARIFY_BATTERY_PCT_MESSAGE = "What battery percentage was the vehicle returned at?"
+
+
+def _find_vehicles(con: sqlite3.Connection, vehicle_model: str | None, vehicle_type: str | None) -> list[sqlite3.Row]:
+    cur = con.cursor()
+    if vehicle_model:
+        cur.execute("SELECT * FROM vehicles WHERE model LIKE ?", (f"%{vehicle_model}%",))
+        rows = cur.fetchall()
+        if rows:
+            return rows
+    if vehicle_type:
+        cur.execute("SELECT * FROM vehicles WHERE vehicle_type = ?", (vehicle_type,))
+        return cur.fetchall()
+    return []
+
+
+def late_fee_hypothetical(
+    con: sqlite3.Connection,
+    vehicle_model: str | None,
+    vehicle_type: str | None,
+    delay_minutes: int,
+    tier: str,
+) -> ToolResult:
+    """A direct 'what would the late fee be' question, not tied to any real
+    booking — e.g. "scooter, 35 minutes late, GOLD tier". Uses the same
+    calculators.late_fee as explain_charge, with a synthetic scheduled_end
+    exactly delay_minutes before a synthetic actual_return so the lateness
+    comes out to exactly what was asked."""
+    vehicles = _find_vehicles(con, vehicle_model, vehicle_type)
+    if not vehicles:
+        return ToolResult(ok=False, message=CLARIFY_VEHICLE_MESSAGE)
+
+    sched = now_utc()
+    actual = sched + timedelta(minutes=delay_minutes)
+
+    results = []
+    evidence = []
+    for v in vehicles[:6]:  # cap: if a bare vehicle_type matches many models, show a representative set
+        result = calc.late_fee(sched, actual, Decimal(str(v["hourly_rate"])), tier)
+        results.append({
+            "model": v["model"],
+            "vehicle_type": v["vehicle_type"],
+            "hourly_rate": v["hourly_rate"],
+            "tier": tier,
+            "delay_minutes": delay_minutes,
+            "result": {k: str(val) for k, val in result.value.items()},
+        })
+        evidence.append({"type": "calculation", "tool": "late_fee", "steps": result.steps, "citations": _cite(result)})
+
+    data = {"vehicle_query": vehicle_model or vehicle_type, "delay_minutes": delay_minutes, "tier": tier, "results": results}
+    return ToolResult(ok=True, data=data, evidence=evidence)
+
+
+def battery_fee_hypothetical(
+    con: sqlite3.Connection,
+    vehicle_model: str | None,
+    vehicle_type: str | None,
+    battery_pct: int | None,
+) -> ToolResult:
+    """A direct 'what would the low-battery fee be' question for an EV,
+    not tied to any real booking."""
+    if battery_pct is None:
+        return ToolResult(ok=False, message=CLARIFY_BATTERY_PCT_MESSAGE)
+
+    vehicles = _find_vehicles(con, vehicle_model, vehicle_type)
+    if not vehicles:
+        return ToolResult(ok=False, message=CLARIFY_VEHICLE_MESSAGE)
+
+    seen_types = []
+    evidence = []
+    results = []
+    for v in vehicles:
+        if v["vehicle_type"] in seen_types:
+            continue
+        seen_types.append(v["vehicle_type"])
+        result = calc.battery_fee(v["vehicle_type"], battery_pct)
+        results.append({
+            "vehicle_type": v["vehicle_type"],
+            "model": v["model"],
+            "battery_pct": battery_pct,
+            "result": None if result.value is None else {k: str(val) for k, val in result.value.items()},
+        })
+        evidence.append({"type": "calculation", "tool": "battery_fee", "steps": result.steps, "citations": _cite(result)})
+
+    data = {"vehicle_query": vehicle_model or vehicle_type, "battery_pct": battery_pct, "results": results}
     return ToolResult(ok=True, data=data, evidence=evidence)
 
 

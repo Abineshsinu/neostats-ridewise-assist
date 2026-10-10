@@ -76,6 +76,31 @@ def test_guard_blocks_before_any_llm_call():
     assert "api" not in result.answer.lower() or "can't help" in result.answer.lower()
 
 
+def test_late_fee_hypothetical_end_to_end():
+    con = build_customer_sandbox("CUST0001")
+    client = mock_client(
+        {"intent": "late_fee_hypothetical", "entities": {"vehicle_model": "Honda Activa 6G", "tier": "GOLD", "delay_minutes": 31}, "needs": ["calculation", "policy"]},
+        "That would be a late fee of ₹90 plus GST.",
+    )
+    result = run_turn(client, get_policy_search(), con, "customer", "Late fee for a Honda Activa 6G, 31 minutes late, GOLD tier?", [], {})
+    assert result.answer == "That would be a late fee of ₹90 plus GST."
+    calc_evidence = [e for e in result.evidence if e.get("type") == "calculation" and e.get("tool") == "late_fee"]
+    assert calc_evidence
+    assert any("90.00" in step for step in calc_evidence[0]["steps"])
+
+
+def test_battery_fee_hypothetical_end_to_end():
+    con = build_customer_sandbox("CUST0001")
+    client = mock_client(
+        {"intent": "battery_fee_hypothetical", "entities": {"vehicle_model": "Ather 450X", "battery_pct": 7}, "needs": ["calculation", "policy"]},
+        "That's below 10%, so a ₹150 + GST fee applies.",
+    )
+    result = run_turn(client, get_policy_search(), con, "customer", "What if an Ather 450X comes back at 7% battery?", [], {})
+    assert result.answer == "That's below 10%, so a ₹150 + GST fee applies."
+    calc_evidence = [e for e in result.evidence if e.get("type") == "calculation" and e.get("tool") == "battery_fee"]
+    assert calc_evidence
+
+
 def test_no_evidence_prompts_for_more_detail_without_composer_call():
     con = build_customer_sandbox("CUST0001")
     client = MagicMock()

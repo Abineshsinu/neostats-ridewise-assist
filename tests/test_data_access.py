@@ -110,6 +110,67 @@ def test_explain_charge_unknown_booking_refuses():
     assert result.message == da.NOT_FOUND_MESSAGE
 
 
+def test_late_fee_hypothetical_by_model_gold_31_min_charges_full_lateness():
+    """Direct hypothetical: GOLD tier, 31 minutes late -> full lateness
+    charged (not reduced by the 30-min grace), matching Annexure A."""
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.late_fee_hypothetical(cust1, "Honda Activa 6G", None, 31, "GOLD")
+    assert result.ok
+    r = result.data["results"][0]
+    assert r["model"] == "Honda Activa 6G"
+    assert Decimal(r["result"]["fee"]) == Decimal("90.00")  # 1hr x 1.5 x 60
+
+
+def test_late_fee_hypothetical_gold_exactly_30_min_no_fee():
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.late_fee_hypothetical(cust1, "Honda Activa 6G", None, 30, "GOLD")
+    assert result.ok
+    assert Decimal(result.data["results"][0]["result"]["total"]) == Decimal("0.00")
+
+
+def test_late_fee_hypothetical_by_type_returns_multiple_models():
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.late_fee_hypothetical(cust1, None, "SCOOTER", 10, "STANDARD")
+    assert result.ok
+    assert len(result.data["results"]) > 1
+    assert all(r["vehicle_type"] == "SCOOTER" for r in result.data["results"])
+
+
+def test_late_fee_hypothetical_unknown_vehicle_asks_for_clarification():
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.late_fee_hypothetical(cust1, "Nonexistent Model XYZ", None, 10, "STANDARD")
+    assert not result.ok
+    assert result.message == da.CLARIFY_VEHICLE_MESSAGE
+
+
+def test_battery_fee_hypothetical_9_pct_charges_flat_fee():
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.battery_fee_hypothetical(cust1, "Ather 450X", None, 9)
+    assert result.ok
+    assert Decimal(result.data["results"][0]["result"]["total"]) == Decimal("177.00")
+
+
+def test_battery_fee_hypothetical_exactly_10_pct_no_fee():
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.battery_fee_hypothetical(cust1, "Ather 450X", None, 10)
+    assert result.ok
+    assert Decimal(result.data["results"][0]["result"]["total"]) == Decimal("0.00")
+
+
+def test_battery_fee_hypothetical_non_ev_type_reports_no_fee():
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.battery_fee_hypothetical(cust1, "Honda Activa 6G", None, 5)
+    assert result.ok
+    assert Decimal(result.data["results"][0]["result"]["total"]) == Decimal("0.00")
+
+
+def test_battery_fee_hypothetical_missing_pct_asks_for_clarification():
+    cust1 = build_customer_sandbox("CUST0001")
+    result = da.battery_fee_hypothetical(cust1, "Ather 450X", None, None)
+    assert not result.ok
+    assert result.message == da.CLARIFY_BATTERY_PCT_MESSAGE
+
+
 def test_cross_customer_isolation_end_to_end_for_all_tools():
     """A booking that genuinely exists (for another customer) must be
     unreachable through every vetted tool from this customer's sandbox."""

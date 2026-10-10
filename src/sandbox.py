@@ -109,7 +109,6 @@ def build_customer_sandbox(customer_id: str) -> sqlite3.Connection | None:
     cur.execute("SELECT * FROM bookings WHERE customer_id = ?", (real_customer_id,))
     booking_rows = cur.fetchall()
     booking_ids = [b["booking_id"] for b in booking_rows]
-    vehicle_ids = sorted({b["vehicle_id"] for b in booking_rows})
 
     payment_rows = []
     damage_rows = []
@@ -120,11 +119,13 @@ def build_customer_sandbox(customer_id: str) -> sqlite3.Connection | None:
         cur.execute(f"SELECT * FROM damage_reports WHERE booking_id IN ({placeholders})", booking_ids)
         damage_rows = cur.fetchall()
 
-    vehicle_rows = []
-    if vehicle_ids:
-        placeholders = ",".join("?" for _ in vehicle_ids)
-        cur.execute(f"SELECT * FROM vehicles WHERE vehicle_id IN ({placeholders})", vehicle_ids)
-        vehicle_rows = cur.fetchall()
+    # The full vehicle catalog (model, type, hourly/daily rate) is published
+    # rate-card information, not customer-private data — it's the same
+    # table reproduced in RW-POL-04 Annexure/§1.5. Customers need it to ask
+    # hypothetical questions ("what if I rent a Honda Activa and return
+    # late?") about vehicles they haven't necessarily booked themselves.
+    cur.execute("SELECT * FROM vehicles")
+    vehicle_rows = cur.fetchall()
 
     raw.close()
 

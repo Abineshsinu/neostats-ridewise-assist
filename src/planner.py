@@ -31,6 +31,8 @@ class Entities(BaseModel):
     hub: str | None = None
     date_or_period: str | None = None
     hypothetical: bool = False
+    delay_minutes: int | None = None
+    battery_pct: int | None = None
 
 
 class Plan(BaseModel):
@@ -50,7 +52,7 @@ SYSTEM_PROMPT = """You are the understanding step of a read-only assistant for R
 Given the user's latest message, conversation memory, and any already-resolved entities, output ONLY a single JSON object (no prose, no markdown fences) with this exact shape:
 
 {
-  "intent": "<short snake_case label, e.g. refund_estimate, late_fee_explain, booking_lookup, policy_question, analytics, out_of_scope>",
+  "intent": "<short snake_case label, e.g. refund_estimate, late_fee_explain, late_fee_hypothetical, battery_fee_hypothetical, booking_lookup, policy_question, analytics, out_of_scope>",
   "entities": {
     "booking_id": "<e.g. B-0001 or null>",
     "vehicle_model": "<e.g. Honda Activa 6G or null>",
@@ -58,12 +60,16 @@ Given the user's latest message, conversation memory, and any already-resolved e
     "tier": "<STANDARD|SILVER|GOLD or null>",
     "hub": "<hub name or null>",
     "date_or_period": "<free text date/period mentioned, or null>",
-    "hypothetical": <true if this is a what-if question, else false>
+    "hypothetical": <true if this is a what-if question, else false>,
+    "delay_minutes": "<integer minutes late mentioned for a late-fee question, or null>",
+    "battery_pct": "<integer battery percent mentioned for a battery-fee question, or null>"
   },
   "needs": [<subset of "data", "policy", "calculation", "out_of_scope">]
 }
 
 Rules:
+- Use intent "late_fee_hypothetical" for a direct "what would the late fee be" question not tied to a real booking (e.g. "a scooter returned 35 minutes late on GOLD tier") — needs should include "calculation" and usually "policy". Convert any stated delay into delay_minutes (e.g. "half an hour" -> 30, "1 hour 10 minutes" -> 70).
+- Use intent "battery_fee_hypothetical" for a direct "what would the low-battery fee be" question for an EV not tied to a real booking — needs should include "calculation" and usually "policy".
 - If a follow-up reuses context from before (e.g. "and for an EV?", "what if I'm Gold?"), carry over the already-resolved entities unless the user overrides them.
 - "out_of_scope" is for anything not about RideWise bookings/payments/policies (weather, general chat, coding help) or requests to act (cancel/refund/edit/delete) rather than inform.
 - Never invent a booking_id, customer_id, or other identifier the user didn't give you.
