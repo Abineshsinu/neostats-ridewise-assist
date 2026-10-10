@@ -132,6 +132,7 @@ def chat_screen() -> None:
                     user_input,
                     st.session_state.history,
                     st.session_state.resolved_entities,
+                    customer_id=st.session_state.customer_id,
                 )
             st.markdown(result.answer)
             if result.evidence:

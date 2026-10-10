@@ -9,6 +9,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 
+from src import audit
 from src import data_access as da
 from src import guard
 from src.composer import compose
@@ -36,14 +37,17 @@ def run_turn(
     user_message: str,
     history: list[dict],
     resolved_entities: dict,
+    customer_id: str | None = None,
 ) -> TurnResult:
     guard_result = guard.check_input(user_message)
     if not guard_result.allowed:
+        audit.log_event(role, customer_id, refusal_reason=guard_result.reason)
         return TurnResult(answer=guard_result.refusal_message, evidence=[], assumptions=[])
 
     the_plan = plan(client, user_message, history, resolved_entities)
 
     if "out_of_scope" in the_plan.needs or the_plan.intent == "out_of_scope":
+        audit.log_event(role, customer_id, refusal_reason="out_of_scope")
         return TurnResult(answer=guard.SCOPED_REFUSAL, evidence=[], assumptions=[], plan=the_plan)
 
     if the_plan.intent == "clarify" and the_plan.clarification_question:
@@ -73,7 +77,10 @@ def run_turn(
         evidence.extend(tool_evidence)
         assumptions.extend(tool_assumptions)
         if early_refusal:
+            audit.log_event(role, customer_id, tool=the_plan.intent, refusal_reason="not_found")
             return TurnResult(answer=early_refusal, evidence=evidence, assumptions=assumptions, plan=the_plan)
+        elif tool_evidence:
+            audit.log_event(role, customer_id, tool=the_plan.intent, row_count=len(tool_evidence), masking_applied=(role == "agent"))
 
     if "policy" in the_plan.needs:
         applicable_doc = None
