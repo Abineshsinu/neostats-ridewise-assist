@@ -1,4 +1,6 @@
 """Security tests: customer sandbox isolation and agent masking."""
+import threading
+
 from src.sandbox import build_agent_connection, build_customer_sandbox
 
 
@@ -73,3 +75,80 @@ def test_agent_connection_has_all_customers():
     cur = con.cursor()
     cur.execute("SELECT COUNT(*) AS c FROM customers")
     assert cur.fetchone()["c"] == 200
+
+
+# ---------------------------------------------------------------------------
+# Regression: Streamlit reruns the script in a new thread per interaction,
+# but the sandbox/agent connection lives in st.session_state across reruns.
+# sqlite3 refuses cross-thread use by default ("SQLite objects created in a
+# thread can only be used in that same thread"), which crashed every real
+# query. Fixed with check_same_thread=False; these tests pin that down.
+# ---------------------------------------------------------------------------
+
+def test_customer_sandbox_usable_from_a_different_thread():
+    con = build_customer_sandbox("CUST0012")
+    assert con is not None
+
+    outcome: dict = {}
+
+    def worker():
+        try:
+            cur = con.cursor()
+            cur.execute("SELECT booking_id FROM bookings")
+            outcome["booking_ids"] = {r["booking_id"] for r in cur.fetchall()}
+        except Exception as e:  # pragma: no cover - failure path under test
+            outcome["error"] = e
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    assert "error" not in outcome, f"cross-thread access raised: {outcome.get('error')}"
+    assert outcome["booking_ids"] == {"B-1594", "B-1737", "B-1598", "B-1582"}
+
+
+def test_agent_connection_usable_from_a_different_thread():
+    con = build_agent_connection()
+    outcome: dict = {}
+
+    def worker():
+        try:
+            cur = con.cursor()
+            cur.execute("SELECT COUNT(*) AS c FROM customers")
+            outcome["count"] = cur.fetchone()["c"]
+        except Exception as e:  # pragma: no cover - failure path under test
+            outcome["error"] = e
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    assert "error" not in outcome, f"cross-thread access raised: {outcome.get('error')}"
+    assert outcome["count"] == 200
+
+
+def test_two_customer_sandboxes_are_distinct_connections_and_never_share_data():
+    con_a = build_customer_sandbox("CUST0001")
+    con_b = build_customer_sandbox("CUST0002")
+
+    assert con_a is not con_b
+
+    cur_a, cur_b = con_a.cursor(), con_b.cursor()
+    cur_a.execute("SELECT customer_id FROM customers")
+    cur_b.execute("SELECT customer_id FROM customers")
+    ids_a = {r["customer_id"] for r in cur_a.fetchall()}
+    ids_b = {r["customer_id"] for r in cur_b.fetchall()}
+
+    assert ids_a == {"CUST0001"}
+    assert ids_b == {"CUST0002"}
+    assert ids_a.isdisjoint(ids_b)
+
+
+def test_building_a_new_session_never_reuses_a_prior_sandbox_object():
+    """Each session start (or 'New conversation' / role switch) must build
+    a fresh connection, never reuse one left over from a previous session —
+    this is what makes 'reset ALL state on role/customer change' true at
+    the connection level, not just at the UI's visible history level."""
+    first = build_customer_sandbox("CUST0001")
+    second = build_customer_sandbox("CUST0001")
+    assert first is not second
