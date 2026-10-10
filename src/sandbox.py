@@ -128,7 +128,12 @@ def build_customer_sandbox(customer_id: str) -> sqlite3.Connection | None:
 
     raw.close()
 
-    sandbox = sqlite3.connect(":memory:")
+    # check_same_thread=False: Streamlit can rerun the script in a new
+    # thread per interaction while this connection lives in
+    # st.session_state across reruns. Safe here because each in-memory
+    # sandbox is private to one session and accessed by one request at a
+    # time (no concurrent access from multiple threads simultaneously).
+    sandbox = sqlite3.connect(":memory:", check_same_thread=False)
     sandbox.row_factory = sqlite3.Row
     sandbox.executescript(SCHEMA)
 
@@ -161,7 +166,7 @@ def build_agent_connection() -> sqlite3.Connection:
 
     raw.close()
 
-    agent_db = sqlite3.connect(":memory:")
+    agent_db = sqlite3.connect(":memory:", check_same_thread=False)
     agent_db.row_factory = sqlite3.Row
     agent_db.executescript(SCHEMA)
 
